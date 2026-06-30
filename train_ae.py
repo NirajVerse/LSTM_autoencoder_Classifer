@@ -18,14 +18,15 @@ from training import fit_scaler, make_loader, save_ae_checkpoint, transform_wind
 from utils import (
     ensure_run_dirs,
     get_device,
+    get_train_datasets_dir,
     load_config,
     make_run_id,
     resolve_path,
-    resolve_run_id,
     save_config_snapshot,
     save_json,
     set_seed,
     update_run_info,
+    validate_datasets_layout,
     write_latest_run,
 )
 
@@ -48,7 +49,8 @@ def main() -> None:
     set_seed(cfg["seed"])
     device = get_device()
 
-    datasets_dir = resolve_path(cfg["datasets_dir"])
+    datasets_dir = get_train_datasets_dir(cfg)
+    validate_datasets_layout(datasets_dir, ["clean"], purpose="Train")
     run_id = args.run_id or make_run_id()
     ckpt_dir, results_dir = ensure_run_dirs(cfg, run_id)
     save_config_snapshot(results_dir, cfg, args.config)

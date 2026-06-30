@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-"""Generate candidate figures for the MILCOM 2-page paper.
+"""Generate paper figures from held-out TEST data and test_evaluation.json.
 
-Each figure is written to ml/figures/ as both .png (for previewing) and .pdf
-(for direct LaTeX import). Run with:
+Run after evaluate.py:
 
-    cd ml && .venv/bin/python make_paper_figures.py
+    cd ml && python evaluate.py --run-id <id>
+    python make_paper_figures.py --run-id <id>
 
-Outputs:
-    figures/cm.{png,pdf}                Confusion matrix (heatmap)
-    figures/metrics_bar.{png,pdf}       Per-class precision/recall/F1 bars
-    figures/bler_timeseries.{png,pdf}   dl_bler over time, all classes
-    figures/snr_timeseries.{png,pdf}    dl_snr over time, all classes
-    figures/kpi_grid.{png,pdf}          2x2 grid of 4 KPIs
-    figures/combined_2panel.{png,pdf}   BLER timeseries + confusion matrix
+KPI time-series plots use test_datasets_dir CSVs only.
+Confusion matrix / metrics bars use test_evaluation.json (not training data).
 """
 
 from __future__ import annotations
@@ -28,13 +23,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support
 
-from utils import get_run_dirs, load_config, resolve_run_id
+from utils import (
+    ensure_train_test_separate,
+    get_run_dirs,
+    get_test_datasets_dir,
+    load_config,
+    resolve_run_id,
+    validate_datasets_layout,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DATASETS = ROOT / "datasets"
 ML_ROOT = Path(__file__).resolve().parent
 OUT_DIR = ML_ROOT / "figures"
+DATASETS: Path | None = None
 
 # Folder name -> (display label, line color)
 CLASS_STYLE = {
@@ -61,6 +63,8 @@ def load_csv_column(path: Path, col: str) -> list[float]:
 
 
 def get_class_csv(class_name: str) -> Path | None:
+    if DATASETS is None:
+        return None
     folder = DATASETS / class_name
     if not folder.is_dir():
         return None
@@ -105,7 +109,7 @@ def fig_confusion_matrix(eval_data: dict) -> None:
 
     acc = np.trace(cm) / max(cm.sum(), 1) * 100
     ax.set_title(
-        f"Classifier confusion matrix\n"
+        f"Test-set confusion matrix\n"
         f"Overall accuracy: {acc:.1f}%  (n={cm.sum()} windows)",
         fontsize=11, fontweight="bold",
     )
@@ -153,7 +157,7 @@ def fig_metrics_bar(eval_data: dict) -> None:
     ax.set_xticklabels(classes, fontsize=11)
     ax.set_ylabel("Score", fontsize=12)
     ax.set_ylim(0, 1.08)
-    ax.set_title("Per-class classification performance",
+    ax.set_title("Test-set per-class classification performance",
                  fontsize=12, fontweight="bold")
     ax.legend(loc="lower right", fontsize=10, framealpha=0.95)
     ax.grid(True, axis="y", alpha=0.3)
@@ -187,7 +191,7 @@ def fig_bler_timeseries() -> None:
 
     ax.set_xlabel("Time (s)", fontsize=12)
     ax.set_ylabel("DL BLER (%)", fontsize=12)
-    ax.set_title("Downlink Block Error Rate per class",
+    ax.set_title("Test capture: downlink BLER per class",
                  fontsize=12, fontweight="bold")
     ax.set_ylim(-3, 105)
     ax.grid(True, alpha=0.3)
@@ -297,7 +301,7 @@ def fig_combined_two_panel(eval_data: dict) -> None:
 
     ax_l.set_xlabel("Time (s)", fontsize=11)
     ax_l.set_ylabel("DL BLER (%)", fontsize=11)
-    ax_l.set_title("(a) Downlink BLER signature per class",
+    ax_l.set_title("(a) Test capture: DL BLER signature per class",
                    fontsize=11, fontweight="bold")
     ax_l.legend(loc="upper right", fontsize=9, framealpha=0.95)
     ax_l.grid(True, alpha=0.3)
@@ -314,7 +318,7 @@ def fig_combined_two_panel(eval_data: dict) -> None:
     ax_r.set_yticklabels(classes, fontsize=10)
     ax_r.set_xlabel("Predicted class", fontsize=11)
     ax_r.set_ylabel("True class", fontsize=11)
-    ax_r.set_title("(b) Classifier confusion matrix\n(per-class recall)",
+    ax_r.set_title("(b) Test-set confusion matrix\n(per-class recall)",
                    fontsize=11, fontweight="bold")
 
     for i in range(len(classes)):
@@ -337,13 +341,19 @@ def fig_combined_two_panel(eval_data: dict) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate paper figures for a training run")
+    p = argparse.ArgumentParser(description="Generate paper figures from held-out test results")
     p.add_argument("--config", type=Path, default=None)
     p.add_argument(
         "--run-id",
         type=str,
         default=None,
-        help="Run folder (default: latest training run)",
+        help="Training run folder (default: latest)",
+    )
+    p.add_argument(
+        "--test-datasets",
+        type=Path,
+        default=None,
+        help="Override test_datasets_dir from config.yaml",
     )
     return p.parse_args()
 
@@ -351,21 +361,29 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     cfg = load_config(args.config)
+    ensure_train_test_separate(cfg)
+
     run_id = resolve_run_id(args.run_id, cfg=cfg)
     _, results_dir = get_run_dirs(cfg, run_id)
-    results_path = results_dir / "evaluation.json"
+    results_path = results_dir / "test_evaluation.json"
 
     if not results_path.exists():
         raise SystemExit(
-            f"Missing {results_path}. Run evaluate.py first for run id {run_id}."
+            f"Missing {results_path}.\n"
+            f"Collect held-out test CSVs under test_datasets_dir, then run:\n"
+            f"  python evaluate.py --run-id {run_id}"
         )
     with open(results_path) as f:
         eval_data = json.load(f)
 
-    global OUT_DIR
+    global DATASETS, OUT_DIR
+    DATASETS = get_test_datasets_dir(cfg, args.test_datasets)
+    validate_datasets_layout(DATASETS, cfg["classes"], purpose="Test")
     OUT_DIR = ML_ROOT / "figures" / run_id
 
     print(f"Run id: {run_id}")
+    print(f"  test KPI plots from: {DATASETS}")
+    print(f"  test metrics from:   {results_path}")
     print("Generating paper figures...")
     fig_confusion_matrix(eval_data)
     fig_metrics_bar(eval_data)

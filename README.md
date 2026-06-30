@@ -5,17 +5,20 @@ Classifies **5G UE KPI traces** from `rtue` into **clean**, **barrage**, or **ra
 1. **LSTM autoencoder** — trained on clean data only; learns normal link behavior.
 2. **Hybrid classifier** — BiLSTM + attention head on frozen encoder features; predicts the attack type.
 
-Input is semicolon-separated metrics CSVs (1 row ≈ 1 second). Each file is split into 30 s windows (15 s stride) using 12 KPIs plus 4 engineered features (SNR/BLER stats, etc.).
+Input is semicolon-separated metrics CSVs (1 row ≈ 1 second). Each file is split into 30 s windows (15 s stride) using 12 KPIs plus 4 engineered features.
 
-## Data layout
+## Train vs test data (important)
 
-Place CSVs under the folder named in `config.yaml` (`datasets_dir`):
+| Folder | Config key | Used by |
+|---|---|---|
+| `datasets_02/` | `datasets_dir` | **Training only** (`train_ae.py`, `train_clf.py`) |
+| `datasets_03/` | `test_datasets_dir` | **Evaluation & paper figures only** |
 
 ```
-datasets/
-  clean/run_001_metrics.csv
-  barrage/run_001_metrics.csv
-  random/run_001_metrics.csv
+datasets_02/                    datasets_03/
+  clean/run_001_metrics.csv       clean/run_001_metrics.csv
+  barrage/...                     barrage/...
+  random/...                      random/...
 ```
 
 ## Setup
@@ -27,40 +30,56 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Edit `config.yaml` if needed (paths, classes, hyperparameters).
+Edit `config.yaml` if needed.
 
-## Train & evaluate
+## Workflow
 
-**Full pipeline** (recommended):
+**1. Train** (uses `datasets_dir` only):
 
 ```bash
 python run_all.py
+# or: python train_ae.py && python train_clf.py
 ```
 
-**Step by step:**
+**2. Collect test CSVs** into `datasets_03/` (separate session from training).
+
+**3. Evaluate on test set**:
 
 ```bash
-python train_ae.py      # autoencoder on clean only
-python train_clf.py     # classifier on all classes
-python evaluate.py      # metrics + confusion matrix
-python make_paper_figures.py   # PNG/PDF figures for the paper
+python evaluate.py --run-id <run_id>
 ```
 
-**Predict one CSV:**
+Saves `results/<run_id>/test_evaluation.json` — use these numbers in the paper.
+
+**4. Paper figures** (test KPIs + test confusion matrix):
 
 ```bash
-python predict.py --csv ../datasets/barrage/run_001_metrics.csv
+python make_paper_figures.py --run-id <run_id>
 ```
 
-Use `--run-id <id>` on any script to pick a specific run. Default is the latest.
+**Predict one CSV** (any file, e.g. a single test capture):
+
+```bash
+python predict.py --csv ../datasets_03/barrage/run_001_metrics.csv --run-id <run_id>
+```
+
+## Run history
+
+Each training run gets a timestamp id (`20250630_214530`). Checkpoints and results are stored under that id; nothing is overwritten.
+
+```
+ml/checkpoints/<run_id>/
+ml/results/<run_id>/test_evaluation.json
+ml/figures/<run_id>/
+ml/latest_run.txt
+```
 
 ## Main files
 
 | File | Purpose |
 |------|---------|
-| `config.yaml` | Paths, classes, window size, model/training settings |
-| `load_data.py` / `features.py` | CSV loading and feature engineering |
-| `models.py` | Autoencoder and classifier architectures |
-| `train_ae.py` / `train_clf.py` | Training scripts |
-| `evaluate.py` | Test-set report and per-file votes |
-| `make_paper_figures.py` | Confusion matrix, KPI plots, bar charts |
+| `config.yaml` | Train/test paths, classes, hyperparameters |
+| `train_ae.py` / `train_clf.py` | Train on `datasets_dir` |
+| `evaluate.py` | Predict on `test_datasets_dir` only |
+| `make_paper_figures.py` | Figures from test data + `test_evaluation.json` |
+| `predict.py` | Single-file prediction |

@@ -1,5 +1,6 @@
 # Paths (relative to milcom/ root)
-datasets_dir: datasets_02
+datasets_dir: datasets_02          # TRAIN only
+test_datasets_dir: datasets_03      # TEST only — held-out captures for evaluate / paper figures
 checkpoints_dir: ml/checkpoints
 results_dir: ml/results
 

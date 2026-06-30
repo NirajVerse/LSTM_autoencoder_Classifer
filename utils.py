@@ -30,6 +30,63 @@ def resolve_path(relative: str) -> Path:
     return (MILCOM_ROOT / relative).resolve()
 
 
+def get_train_datasets_dir(cfg: dict[str, Any], override: Path | str | None = None) -> Path:
+    if override is not None:
+        return Path(override).resolve()
+    if not cfg.get("datasets_dir"):
+        raise ValueError("datasets_dir must be set in config.yaml")
+    return resolve_path(cfg["datasets_dir"])
+
+
+def get_test_datasets_dir(cfg: dict[str, Any], override: Path | str | None = None) -> Path:
+    if override is not None:
+        return Path(override).resolve()
+    if not cfg.get("test_datasets_dir"):
+        raise ValueError(
+            "test_datasets_dir must be set in config.yaml for evaluate.py / paper figures"
+        )
+    return resolve_path(cfg["test_datasets_dir"])
+
+
+def validate_datasets_layout(
+    datasets_dir: Path,
+    class_names: list[str],
+    *,
+    purpose: str,
+) -> None:
+    if not datasets_dir.is_dir():
+        raise FileNotFoundError(f"{purpose} directory not found: {datasets_dir}")
+
+    missing: list[str] = []
+    empty: list[str] = []
+    for name in class_names:
+        class_dir = datasets_dir / name
+        if not class_dir.is_dir():
+            missing.append(name)
+            continue
+        if not list(class_dir.glob("*.csv")):
+            empty.append(name)
+
+    if missing or empty:
+        lines = [f"{purpose} layout invalid under {datasets_dir}:"]
+        if missing:
+            lines.append(f"  missing folders: {missing}")
+        if empty:
+            lines.append(f"  folders with no CSV: {empty}")
+        lines.append("Expected: <dir>/clean/*.csv, <dir>/barrage/*.csv, <dir>/random/*.csv")
+        raise FileNotFoundError("\n".join(lines))
+
+
+def ensure_train_test_separate(cfg: dict[str, Any]) -> None:
+    train_dir = get_train_datasets_dir(cfg)
+    test_dir = get_test_datasets_dir(cfg)
+    if train_dir.resolve() == test_dir.resolve():
+        raise ValueError(
+            "datasets_dir and test_datasets_dir must be different folders "
+            f"(both point to {train_dir})"
+        )
+
+
 def make_run_id() -> str:
     """Timestamp id for a training run, e.g. 20250630_214530."""
     return datetime.now().strftime("%Y%m%d_%H%M%S")

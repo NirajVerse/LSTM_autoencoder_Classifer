@@ -23,12 +23,13 @@ from training import (
 from utils import (
     get_device,
     get_run_dirs,
+    get_train_datasets_dir,
     load_config,
-    resolve_path,
     resolve_run_id,
     save_json,
     set_seed,
     update_run_info,
+    validate_datasets_layout,
     write_latest_run,
 )
 
@@ -118,7 +119,8 @@ def main() -> None:
     set_seed(cfg["seed"])
     device = get_device()
 
-    datasets_dir = resolve_path(cfg["datasets_dir"])
+    datasets_dir = get_train_datasets_dir(cfg)
+    validate_datasets_layout(datasets_dir, class_names, purpose="Train")
     run_id = resolve_run_id(args.run_id, cfg=cfg)
     ckpt_dir, results_dir = get_run_dirs(cfg, run_id)
     if run_id != "_legacy":

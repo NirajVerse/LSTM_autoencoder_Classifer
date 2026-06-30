@@ -1,0 +1,69 @@
+# Paths (relative to milcom/ root)
+datasets_dir: datasets_02
+checkpoints_dir: ml/checkpoints
+results_dir: ml/results
+
+# Classes — folder names under datasets_dir
+classes:
+  - clean
+  - barrage
+  - random
+
+# Windowing (1 CSV row ≈ 1 second)
+window_size: 30
+window_stride: 15
+
+# Row filters before windowing
+require_traffic: false
+trim_bad_tail: true
+bad_rsrp_threshold: -30.0
+bad_dl_snr_threshold: -20.0
+
+# Raw rtue KPI columns (semicolon CSV)
+raw_features:
+  - rsrp
+  - cfo
+  - dl_mcs
+  - dl_snr
+  - dl_turbo
+  - dl_brate
+  - dl_bler
+  - ul_mcs
+  - ul_brate
+  - ul_bler
+  - ul_buff
+  - ul_ta
+
+# Engineered features (computed per row after raw)
+engineered_features:
+  - dl_snr_diff
+  - dl_snr_roll_std
+  - dl_bler_roll_mean
+  - quality_divergence
+
+roll_window: 5
+
+# Training
+seed: 42
+val_fraction: 0.2
+batch_size: 16
+ae_epochs: 80
+clf_epochs: 100
+learning_rate_ae: 0.001
+learning_rate_clf: 0.001
+
+# Models
+ae_hidden_size: 64
+ae_latent_size: 16
+ae_num_layers: 1
+
+# Hybrid classifier (BiLSTM + multi-head attention + rich stats + residual MLP)
+clf_hidden_sizes: [128, 64]
+clf_dropout: 0.3
+clf_label_smoothing: 0.05
+clf_weight_decay: 0.0001
+clf_early_stop_patience: 25
+clf_bilstm_hidden: 32         # bidirectional → 64 effective
+clf_attn_heads: 4             # multi-head temporal attention
+clf_use_class_weights: true   # important when classes are imbalanced
+clf_mixup_alpha: 0.2          # set to 0 to disable mixup augmentation

@@ -52,18 +52,6 @@ python make_paper_figures.py   # PNG/PDF figures for the paper
 python predict.py --csv ../datasets/barrage/run_001_metrics.csv
 ```
 
-## Run history
-
-Each training run is saved with a timestamp (e.g. `20250630_214530`) so nothing is overwritten:
-
-```
-ml/checkpoints/<run_id>/autoencoder.pt
-ml/checkpoints/<run_id>/classifier.pt
-ml/results/<run_id>/evaluation.json
-ml/figures/<run_id>/
-ml/latest_run.txt   # most recent run id
-```
-
 Use `--run-id <id>` on any script to pick a specific run. Default is the latest.
 
 ## Main files

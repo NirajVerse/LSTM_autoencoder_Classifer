@@ -25,7 +25,33 @@ def read_rtue_csv(path: Path) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def read_metrics_csv(path: Path, cfg: dict) -> pd.DataFrame:
+    if cfg.get("data_format") == "gnb":
+        return pd.read_csv(path).reset_index(drop=True)
+    return read_rtue_csv(path)
+
+
 def filter_rows(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    if cfg.get("data_format") == "gnb":
+        out = df.copy()
+        for col in (
+            "dl_brate",
+            "ul_brate",
+            "dl_nof_ok",
+            "dl_nof_nok",
+            "ul_nof_ok",
+            "ul_nof_nok",
+            "cqi",
+            "dl_bler_pct",
+            "ul_bler_pct",
+        ):
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
+        if cfg.get("require_traffic", False):
+            mask = (out["dl_brate"] > 0) | (out["ul_brate"] > 0) | (out["dl_nof_ok"] > 0)
+            out = out.loc[mask]
+        return out.reset_index(drop=True)
+
     out = df.copy()
     out["rsrp"] = pd.to_numeric(out["rsrp"], errors="coerce")
     out["dl_snr"] = pd.to_numeric(out["dl_snr"], errors="coerce")
@@ -60,11 +86,13 @@ def csv_to_windows(
     window_size = cfg["window_size"]
     stride = cfg["window_stride"]
 
-    df = filter_rows(read_rtue_csv(path), cfg)
+    df = filter_rows(read_metrics_csv(path, cfg), cfg)
     if len(df) < window_size:
         return []
 
-    feat_df = build_feature_frame(df, raw_features, cfg["roll_window"])
+    feat_df = build_feature_frame(
+        df, raw_features, cfg["roll_window"], cfg.get("engineered_features")
+    )
     values = feat_df[all_features].to_numpy(dtype=np.float32)
 
     samples: list[WindowSample] = []

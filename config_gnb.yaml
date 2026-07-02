@@ -1,0 +1,67 @@
+# gNB scheduler KPI training (see gnb_capture.py → datasets_gnb/)
+
+data_format: gnb
+datasets_dir: datasets_gnb
+test_datasets_dir: datasets_gnb_test
+checkpoints_dir: ml/checkpoints
+results_dir: ml/results
+
+classes:
+  - clean
+  - barrage
+  - random
+
+window_size: 30
+window_stride: 15
+
+require_traffic: false
+trim_bad_tail: false
+
+raw_features:
+  - cqi
+  - dl_ri
+  - dl_mcs
+  - dl_brate
+  - dl_nof_ok
+  - dl_nof_nok
+  - dl_bler_pct
+  - dl_bs
+  - pusch_snr_db
+  - pusch_rsrp_db
+  - ul_mcs
+  - ul_brate
+  - ul_nof_ok
+  - ul_nof_nok
+  - ul_bler_pct
+  - bsr
+  - phr
+
+engineered_features:
+  - dl_bler_roll_mean
+  - ul_bler_roll_mean
+  - dl_brate_roll_mean
+  - harq_stress
+
+roll_window: 5
+
+seed: 42
+val_fraction: 0.2
+batch_size: 16
+ae_epochs: 80
+clf_epochs: 100
+learning_rate_ae: 0.001
+learning_rate_clf: 0.001
+
+ae_hidden_size: 64
+ae_latent_size: 16
+ae_num_layers: 1
+
+clf_hidden_sizes: [128, 64]
+clf_dropout: 0.3
+clf_label_smoothing: 0.05
+clf_weight_decay: 0.0001
+clf_early_stop_patience: 25
+clf_bilstm_hidden: 32
+clf_attn_heads: 4
+clf_use_class_weights: true
+clf_mixup_alpha: 0.2

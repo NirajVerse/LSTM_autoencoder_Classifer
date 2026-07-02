@@ -1,25 +1,28 @@
 # ML — Jamming Attack Classifier
 
-Classifies **5G UE KPI traces** from `rtue` into **clean**, **barrage**, or **random** jamming using a two-stage model:
+Classifies **5G UE KPI traces** into **clean**, **barrage**, or **random** using a two-stage model (LSTM autoencoder + hybrid classifier).
 
-1. **LSTM autoencoder** — trained on clean data only; learns normal link behavior.
-2. **Hybrid classifier** — BiLSTM + attention head on frozen encoder features; predicts the attack type.
+## Data flows
 
-Input is semicolon-separated metrics CSVs (1 row ≈ 1 second). Each file is split into 30 s windows (15 s stride) using 12 KPIs plus 4 engineered features.
+### Offline (training & paper evaluation)
 
-## Train vs test data (important)
-
-| Folder | Config key | Used by |
-|---|---|---|
-| `datasets_02/` | `datasets_dir` | **Training only** (`train_ae.py`, `train_clf.py`) |
-| `datasets_03/` | `test_datasets_dir` | **Evaluation & paper figures only** |
-
+```text
+rtue → CSV files → datasets_02/ (train)  → train_ae.py / train_clf.py
+                 → datasets_03/ (test)   → evaluate.py / paper figures
 ```
-datasets_02/                    datasets_03/
-  clean/run_001_metrics.csv       clean/run_001_metrics.csv
-  barrage/...                     barrage/...
-  random/...                      random/...
+
+### Live (paper-style, no mitigation)
+
+```text
+rtue ──→ InfluxDB (KPI-moni) ──→ detect_live.py (ID-xApp) ──→ alert
+  └──→ CSV file (backup / archive)
 ```
+
+| Paper component | Our implementation |
+|---|---|
+| KPI-moni xApp | rtue `metrics_influxdb` → InfluxDB |
+| ID-xApp | `ml/detect_live.py` |
+| SS-xApp (mitigation) | *not implemented* |
 
 ## Setup
 
@@ -30,56 +33,91 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Edit `config.yaml` if needed.
+## 1. Configure rtue (lab machine)
 
-## Workflow
+Use `configs/rtue_ue_uhd_streaming.conf` as reference — enables **both** Influx and CSV:
 
-**1. Train** (uses `datasets_dir` only):
+- `metrics_influxdb_enable = true`
+- `ue_data_identifier = ue1_uhd` (must match `influx.ue_data_id` in `config.yaml`)
+- `metrics_csv_enable = true` + `metrics_csv_append = true` (backup)
+
+InfluxDB must be running (e.g. `docker compose` in ran-tester-ue).
+
+## 2. Train (offline, CSV datasets)
 
 ```bash
 python run_all.py
-# or: python train_ae.py && python train_clf.py
-```
-
-**2. Collect test CSVs** into `datasets_03/` (separate session from training).
-
-**3. Evaluate on test set**:
-
-```bash
+# train on datasets_02; evaluate later on datasets_03
 python evaluate.py --run-id <run_id>
 ```
 
-Saves `results/<run_id>/test_evaluation.json` — use these numbers in the paper.
+## 3. Live detection (Influx stream)
 
-**4. Paper figures** (test KPIs + test confusion matrix):
-
-```bash
-python make_paper_figures.py --run-id <run_id>
-```
-
-**Predict one CSV** (any file, e.g. a single test capture):
+After training and with rtue + Influx running:
 
 ```bash
-python predict.py --csv ../datasets_03/barrage/run_001_metrics.csv --run-id <run_id>
+python detect_live.py --run-id <run_id>
 ```
 
-## Run history
+Output example:
 
-Each training run gets a timestamp id (`20250630_214530`). Checkpoints and results are stored under that id; nothing is overwritten.
-
-```
-ml/checkpoints/<run_id>/
-ml/results/<run_id>/test_evaluation.json
-ml/figures/<run_id>/
-ml/latest_run.txt
+```text
+[2026-06-30T...]  prediction=barrage   confidence=0.94  probs={...}
 ```
 
-## Main files
+Alerts append to `ml/results/live_alerts.jsonl`.
 
-| File | Purpose |
-|------|---------|
-| `config.yaml` | Train/test paths, classes, hyperparameters |
-| `train_ae.py` / `train_clf.py` | Train on `datasets_dir` |
-| `evaluate.py` | Predict on `test_datasets_dir` only |
-| `make_paper_figures.py` | Figures from test data + `test_evaluation.json` |
-| `predict.py` | Single-file prediction |
+Test once and exit:
+
+```bash
+python detect_live.py --run-id <run_id> --once
+```
+
+## Config (`config.yaml`)
+
+| Key | Purpose |
+|---|---|
+| `datasets_dir` | Training CSV folders |
+| `test_datasets_dir` | Held-out test CSV folders |
+| `influx.*` | Influx connection + `ue_data_id` |
+| `live_detection.*` | Poll interval, infer stride, alert threshold |
+
+## Main scripts
+
+| Script | Role |
+|---|---|
+| `train_ae.py` / `train_clf.py` | Train on CSV (`datasets_dir`) |
+| `evaluate.py` | Test-set metrics (`test_datasets_dir`) |
+| `detect_live.py` | **Live** classification from Influx |
+| `influx_kpi.py` | Influx → KPI row mapping |
+| `predict.py` | Single CSV file (manual) |
+| `make_paper_figures.py` | Paper figures from test evaluation |
+| `gnb_capture.py` | **gNB** WebSocket → CSV (training captures) |
+| `gnb_jsonl_to_csv.py` | Convert JSONL archive → CSV |
+| `gnb_metrics_ws_logger.py` | gNB WebSocket → JSONL (optional archive) |
+| `compare_gnb_scenarios.py` | Summarize clean / barrage / random gNB CSVs |
+
+## gNB KPI capture → ML (`config_gnb.yaml`)
+
+Use srsRAN scheduler KPIs from WebSocket (`remote_control` port **8001**). Config is in `ran-tester-ue/configs/srsran/gnb_uhd.yaml`.
+
+**Lab runbook (each scenario ~5–8 min, traffic on):**
+
+1. Copy updated `gnb_uhd.yaml` to the lab.
+2. Terminal A — **start capture before gNB**:
+   ```bash
+   cd milcom/ml && source .venv/bin/activate
+   python gnb_capture.py --output ../datasets_gnb/clean/run_001.csv
+   ```
+3. Terminal B — 5GC + gNB + UE; run ping/iperf UL and DL.
+4. Scenario: clean (no jammer) → save to `datasets_gnb/clean/`; repeat for `barrage/`, `random/`.
+5. Ctrl+C logger between runs; use a new filename per run.
+6. Train:
+   ```bash
+   python run_all.py --config config_gnb.yaml
+   python evaluate.py --config config_gnb.yaml --run-id <id>
+   ```
+
+Held-out test CSVs go under `datasets_gnb_test/{clean,barrage,random}/`.
+
+Key columns: `dl_bler_pct`, `dl_nof_ok`, `dl_nof_nok`, `dl_brate`, `cqi`, `dl_mcs`, `bsr`, `phr`.

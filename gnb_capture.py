@@ -2,7 +2,8 @@
 """
 Capture srsRAN gNB scheduler KPIs to CSV for ML training.
 
-Start this BEFORE the gNB. Requires gNB yaml with remote_control + enable_json
+Start this before or after the gNB (waits for WebSocket). Requires gNB yaml with
+remote_control + enable_json
 (see ran-tester-ue/configs/srsran/gnb_uhd.yaml).
 
   cd milcom/ml && source .venv/bin/activate
@@ -18,6 +19,7 @@ import argparse
 import json
 import signal
 import sys
+import time
 from pathlib import Path
 
 from gnb_metrics_io import rows_from_report, unwrap_payload, write_csv_rows
@@ -29,7 +31,7 @@ except ImportError:
     raise SystemExit(1)
 
 
-def capture(url: str, output: Path, rnti_filter: str | None) -> None:
+def capture(url: str, output: Path, rnti_filter: str | None, wait_sec: float) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
         output.unlink()
@@ -45,7 +47,23 @@ def capture(url: str, output: Path, rnti_filter: str | None) -> None:
 
     print(f"Connecting to {url}", flush=True)
     print(f"Writing CSV → {output}", flush=True)
-    ws = websocket.create_connection(url, timeout=10)
+    print("Waiting for gNB WebSocket (start gNB if not running)...", flush=True)
+    ws = None
+    deadline = time.monotonic() + wait_sec if wait_sec > 0 else None
+    while not stop:
+        try:
+            ws = websocket.create_connection(url, timeout=5)
+            break
+        except (ConnectionRefusedError, OSError):
+            if deadline is not None and time.monotonic() >= deadline:
+                print(
+                    f"Timed out waiting for {url}. Is gNB running with remote_control enabled?",
+                    file=sys.stderr,
+                )
+                return
+            time.sleep(2.0)
+    if ws is None:
+        return
     ws.send(json.dumps({"cmd": "metrics_subscribe"}))
     print(f"Subscribe: {ws.recv()}", flush=True)
 
@@ -97,8 +115,14 @@ def main() -> None:
         help="Output CSV, e.g. ../datasets_gnb/clean/run_001.csv",
     )
     p.add_argument("--rnti", default=None, help="Optional RNTI filter (decimal or hex string)")
+    p.add_argument(
+        "--wait-sec",
+        type=float,
+        default=0.0,
+        help="Max seconds to wait for gNB WebSocket (0 = wait forever)",
+    )
     args = p.parse_args()
-    capture(args.url, args.output, args.rnti)
+    capture(args.url, args.output, args.rnti, args.wait_sec)
 
 
 if __name__ == "__main__":

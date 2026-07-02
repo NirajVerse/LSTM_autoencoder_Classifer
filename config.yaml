@@ -68,3 +68,20 @@ clf_bilstm_hidden: 32         # bidirectional → 64 effective
 clf_attn_heads: 4             # multi-head temporal attention
 clf_use_class_weights: true   # important when classes are imbalanced
 clf_mixup_alpha: 0.2          # set to 0 to disable mixup augmentation
+
+# InfluxDB — live KPI bus (rtue → Influx, paper KPI-moni path)
+# ue_data_id must match ue_data_identifier in rtue config
+influx:
+  host: "127.0.0.1"
+  port: 8086
+  org: "rtu"
+  token: "605bc59413b7d5457d181ccf20f9fda15693f81b068d70396cc183081b264f3b"
+  bucket: "rtusystem"
+  ue_data_id: "ue1_uhd"
+  carrier_type: "nr"
+
+# Live ID-xApp (detect_live.py)
+live_detection:
+  poll_interval_sec: 1.0      # how often to pull new KPI rows from Influx
+  infer_stride_sec: 15        # run classifier every N seconds (match window_stride)
+  alert_confidence: 0.6       # log alert when prob >= this

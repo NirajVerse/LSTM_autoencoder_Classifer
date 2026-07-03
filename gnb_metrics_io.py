@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+import numpy as np
+import pandas as pd
+
+from features import build_feature_frame, feature_column_names
+
 # Columns consumed by ml/config_gnb.yaml and load_data.py (data_format: gnb).
 GNB_CSV_COLUMNS = [
     "timestamp_iso",
@@ -175,3 +180,22 @@ def jsonl_to_csv(
     if not batch:
         return 0
     return write_csv_rows(csv_path, batch, append=False)
+
+
+def gnb_rows_to_window_matrix(
+    rows: list[dict[str, Any]],
+    cfg: dict[str, Any],
+) -> np.ndarray:
+    """Build (1, window_size, n_features) float32 array from gNB KPI row dicts."""
+    window_size = int(cfg["window_size"])
+    if len(rows) < window_size:
+        raise ValueError(f"Need {window_size} KPI rows, got {len(rows)}")
+
+    raw_features = cfg["raw_features"]
+    engineered = cfg.get("engineered_features") or []
+    all_features = feature_column_names(raw_features, engineered)
+
+    df = pd.DataFrame(rows[-window_size:])
+    feat_df = build_feature_frame(df, raw_features, cfg["roll_window"], engineered)
+    values = feat_df[all_features].to_numpy(dtype=np.float32)
+    return values.reshape(1, window_size, len(all_features))

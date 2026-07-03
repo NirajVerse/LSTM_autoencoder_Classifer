@@ -89,6 +89,7 @@ python detect_live.py --run-id <run_id> --once
 | `train_ae.py` / `train_clf.py` | Train on CSV (`datasets_dir`) |
 | `evaluate.py` | Test-set metrics (`test_datasets_dir`) |
 | `detect_live.py` | **Live** classification from Influx |
+| `detect_live_gnb.py` | **Live** classification from gNB WebSocket |
 | `influx_kpi.py` | Influx → KPI row mapping |
 | `predict.py` | Single CSV file (manual) |
 | `make_paper_figures.py` | Paper figures from test evaluation |
@@ -121,3 +122,31 @@ Use srsRAN scheduler KPIs from WebSocket (`remote_control` port **8001**). Confi
 Held-out test CSVs go under `datasets_gnb_test/{clean,barrage,random}/`.
 
 Key columns: `dl_bler_pct`, `dl_nof_ok`, `dl_nof_nok`, `dl_brate`, `cqi`, `dl_mcs`, `bsr`, `phr`.
+
+### Live detection (gNB WebSocket → model)
+
+After training, run the closed-loop detector while toggling the jammer:
+
+```bash
+cd milcom/ml && source .venv/bin/activate
+python detect_live_gnb.py --config config_gnb.yaml --run-id <id>
+```
+
+Lab terminals: 5GC + gNB + UE + ping, then `detect_live_gnb.py`. Turn jammer on/off during the run.
+
+Optional stdin markers (type in the detector terminal when you toggle the jammer):
+
+```text
+jam_on barrage
+jam_off
+```
+
+Logs:
+
+| File | Content |
+|------|---------|
+| `ml/results/live_gnb_predictions.jsonl` | Every inference |
+| `ml/results/live_gnb_alerts.jsonl` | High-confidence consecutive alerts |
+| `ml/results/live_gnb_events.jsonl` | `jam_on` / `jam_off` markers for TTD |
+
+Expect ~30–60 s delay after jammer toggle (30 s window + 15 s infer stride).

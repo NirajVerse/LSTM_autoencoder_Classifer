@@ -65,3 +65,11 @@ clf_bilstm_hidden: 32
 clf_attn_heads: 4
 clf_use_class_weights: true
 clf_mixup_alpha: 0.2
+
+# Live gNB detection (detect_live_gnb.py)
+live_detection:
+  websocket_url: "ws://127.0.0.1:8001"
+  websocket_timeout_sec: 1.0
+  infer_stride_sec: 15          # run classifier every N seconds (match window_stride)
+  alert_confidence: 0.6         # minimum softmax prob to count toward alerts / TTD
+  consecutive_alerts: 2         # require N consecutive agreeing predictions

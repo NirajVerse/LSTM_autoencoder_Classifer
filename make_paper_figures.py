@@ -47,10 +47,37 @@ CLASS_STYLE = {
 }
 
 
+# rtue vs gNB column names for time-series plots
+KPI_COLUMNS: dict[str, str] = {
+    "dl_bler": "dl_bler",
+    "ul_bler": "ul_bler",
+    "dl_snr": "dl_snr",
+}
+
+
+def set_kpi_columns_from_config(cfg: dict) -> None:
+    global KPI_COLUMNS
+    if cfg.get("data_format") == "gnb":
+        KPI_COLUMNS = {
+            "dl_bler": "dl_bler_pct",
+            "ul_bler": "ul_bler_pct",
+            "dl_snr": "pusch_snr_db",
+        }
+    else:
+        KPI_COLUMNS = {
+            "dl_bler": "dl_bler",
+            "ul_bler": "ul_bler",
+            "dl_snr": "dl_snr",
+        }
+
+
 def load_csv_column(path: Path, col: str) -> list[float]:
     vals: list[float] = []
     with open(path) as f:
-        reader = csv.DictReader(f, delimiter=";")
+        sample = f.read(4096)
+        f.seek(0)
+        delimiter = ";" if sample.count(";") > sample.count(",") else ","
+        reader = csv.DictReader(f, delimiter=delimiter)
         for row in reader:
             v = row.get(col)
             if v in (None, "", "n/a"):
@@ -181,7 +208,7 @@ def fig_bler_timeseries() -> None:
         csv_path = get_class_csv(class_name)
         if csv_path is None:
             continue
-        bler = load_csv_column(csv_path, "dl_bler")
+        bler = load_csv_column(csv_path, KPI_COLUMNS["dl_bler"])
         if not bler:
             continue
         sm = smooth(bler, w=5)
@@ -210,7 +237,7 @@ def fig_snr_timeseries() -> None:
         csv_path = get_class_csv(class_name)
         if csv_path is None:
             continue
-        snr = load_csv_column(csv_path, "dl_snr")
+        snr = load_csv_column(csv_path, KPI_COLUMNS["dl_snr"])
         if not snr:
             continue
         sm = smooth(snr, w=5)
@@ -235,10 +262,10 @@ def fig_snr_timeseries() -> None:
 def fig_kpi_grid() -> None:
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 6.5), sharex=False)
     panels = [
-        ("dl_snr",  "DL SNR (dB)",    axes[0, 0], None),
-        ("dl_bler", "DL BLER (%)",    axes[0, 1], (-3, 105)),
-        ("ul_bler", "UL BLER (%)",    axes[1, 0], (-3, 105)),
-        ("dl_snr",  "DL SNR rolling std (dB)", axes[1, 1], None),
+        (KPI_COLUMNS["dl_snr"], "DL SNR (dB)", axes[0, 0], None),
+        (KPI_COLUMNS["dl_bler"], "DL BLER (%)", axes[0, 1], (-3, 105)),
+        (KPI_COLUMNS["ul_bler"], "UL BLER (%)", axes[1, 0], (-3, 105)),
+        (KPI_COLUMNS["dl_snr"], "SNR rolling std (dB)", axes[1, 1], None),
     ]
 
     for col, ylabel, ax, ylim in panels:
@@ -291,7 +318,7 @@ def fig_combined_two_panel(eval_data: dict) -> None:
         csv_path = get_class_csv(class_name)
         if csv_path is None:
             continue
-        bler = load_csv_column(csv_path, "dl_bler")
+        bler = load_csv_column(csv_path, KPI_COLUMNS["dl_bler"])
         if not bler:
             continue
         sm = smooth(bler, w=5)
@@ -362,6 +389,7 @@ def main() -> None:
     args = parse_args()
     cfg = load_config(args.config)
     ensure_train_test_separate(cfg)
+    set_kpi_columns_from_config(cfg)
 
     run_id = resolve_run_id(args.run_id, cfg=cfg)
     _, results_dir = get_run_dirs(cfg, run_id)

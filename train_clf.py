@@ -120,6 +120,7 @@ def main() -> None:
     device = get_device()
 
     datasets_dir = get_train_datasets_dir(cfg)
+    class_names = cfg["classes"]
     validate_datasets_layout(datasets_dir, class_names, purpose="Train")
     run_id = resolve_run_id(args.run_id, cfg=cfg)
     ckpt_dir, results_dir = get_run_dirs(cfg, run_id)
@@ -132,7 +133,6 @@ def main() -> None:
     if not ae_path.exists():
         raise FileNotFoundError(f"Autoencoder checkpoint not found: {ae_path}. Run train_ae.py first.")
 
-    class_names = cfg["classes"]
     samples = load_dataset_from_folders(datasets_dir, class_names, cfg)
     x, y, _ = samples_to_arrays(samples)
     print(f"Loaded {len(x)} windows across classes: {class_names}")

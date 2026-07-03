@@ -52,22 +52,26 @@ KPI_COLUMNS: dict[str, str] = {
     "dl_bler": "dl_bler",
     "ul_bler": "ul_bler",
     "dl_snr": "dl_snr",
+    "dl_mcs": "dl_mcs",
 }
+IS_GNB = False
 
 
 def set_kpi_columns_from_config(cfg: dict) -> None:
-    global KPI_COLUMNS
-    if cfg.get("data_format") == "gnb":
+    global KPI_COLUMNS, IS_GNB
+    IS_GNB = cfg.get("data_format") == "gnb"
+    if IS_GNB:
         KPI_COLUMNS = {
             "dl_bler": "dl_bler_pct",
             "ul_bler": "ul_bler_pct",
-            "dl_snr": "pusch_snr_db",
+            "dl_mcs": "dl_mcs",
         }
     else:
         KPI_COLUMNS = {
             "dl_bler": "dl_bler",
             "ul_bler": "ul_bler",
             "dl_snr": "dl_snr",
+            "dl_mcs": "dl_mcs",
         }
 
 
@@ -228,47 +232,93 @@ def fig_bler_timeseries() -> None:
     save_fig(fig, "bler_timeseries")
 
 
-# ---------------------------------------------------------------------------
-# Figure 4: dl_snr time series, all classes overlaid
-# ---------------------------------------------------------------------------
-def fig_snr_timeseries() -> None:
-    fig, ax = plt.subplots(figsize=(7.0, 3.6))
+def _rolling_std(vals: list[float] | np.ndarray, window: int = 5) -> np.ndarray:
+    arr = np.asarray(vals, dtype=np.float32)
+    if len(arr) < window:
+        return arr
+    return np.array([arr[max(0, i - window + 1): i + 1].std() for i in range(len(arr))])
+
+
+def _plot_class_timeseries(
+    ax: plt.Axes,
+    col: str,
+    *,
+    smooth_series: bool = True,
+    rolling_std: bool = False,
+    unit: str = "",
+) -> None:
     for class_name, (label, color) in CLASS_STYLE.items():
         csv_path = get_class_csv(class_name)
         if csv_path is None:
             continue
-        snr = load_csv_column(csv_path, KPI_COLUMNS["dl_snr"])
-        if not snr:
+        vals = load_csv_column(csv_path, col)
+        if not vals:
             continue
-        sm = smooth(snr, w=5)
-        mean = float(np.mean(snr))
-        ax.plot(range(len(sm)), sm, color=color, linewidth=1.5, alpha=0.9,
-                label=f"{label} (mean={mean:.1f} dB)")
+        if rolling_std:
+            series = _rolling_std(vals, window=5)
+        elif smooth_series:
+            series = smooth(vals, w=5)
+        else:
+            series = np.asarray(vals, dtype=np.float32)
+        mean = float(np.mean(vals))
+        suffix = f" {unit}".rstrip()
+        ax.plot(
+            range(len(series)), series, color=color, linewidth=1.5, alpha=0.9,
+            label=f"{label} (mean={mean:.1f}{suffix})",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Figure 4: UE dl_snr or gNB dl_mcs time series (format-specific)
+# ---------------------------------------------------------------------------
+def fig_signature_timeseries() -> None:
+    fig, ax = plt.subplots(figsize=(7.0, 3.6))
+    if IS_GNB:
+        _plot_class_timeseries(ax, KPI_COLUMNS["dl_mcs"], unit="")
+        ax.set_ylabel("DL MCS", fontsize=12)
+        ax.set_title(
+            "gNB scheduler: downlink MCS per class",
+            fontsize=12, fontweight="bold",
+        )
+        ax.legend(loc="lower right", fontsize=10, framealpha=0.95)
+        out_name = "dl_mcs_timeseries"
+    else:
+        _plot_class_timeseries(ax, KPI_COLUMNS["dl_snr"], unit="dB")
+        ax.set_ylabel("DL SNR (dB)", fontsize=12)
+        ax.set_title("Downlink SNR per class", fontsize=12, fontweight="bold")
+        ax.legend(loc="lower right", fontsize=10, framealpha=0.95)
+        out_name = "snr_timeseries"
 
     ax.set_xlabel("Time (s)", fontsize=12)
-    ax.set_ylabel("DL SNR (dB)", fontsize=12)
-    ax.set_title("Downlink SNR per class",
-                 fontsize=12, fontweight="bold")
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=10, framealpha=0.95)
-
     fig.tight_layout()
-    save_fig(fig, "snr_timeseries")
+    save_fig(fig, out_name)
 
 
 # ---------------------------------------------------------------------------
-# Figure 5: 2x2 KPI grid (dl_snr, dl_bler, ul_bler, dl_snr_roll_std)
+# Figure 5: 2x2 KPI grid (format-specific panels)
 # ---------------------------------------------------------------------------
-def fig_kpi_grid() -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(10.5, 6.5), sharex=False)
-    panels = [
-        (KPI_COLUMNS["dl_snr"], "DL SNR (dB)", axes[0, 0], None),
-        (KPI_COLUMNS["dl_bler"], "DL BLER (%)", axes[0, 1], (-3, 105)),
-        (KPI_COLUMNS["ul_bler"], "UL BLER (%)", axes[1, 0], (-3, 105)),
-        (KPI_COLUMNS["dl_snr"], "SNR rolling std (dB)", axes[1, 1], None),
+def _kpi_grid_panels() -> list[tuple[str, str, str, tuple[float, float] | None]]:
+    if IS_GNB:
+        return [
+            (KPI_COLUMNS["dl_mcs"], "DL MCS", "smooth", None),
+            (KPI_COLUMNS["dl_bler"], "DL BLER (%)", "smooth", (-3, 105)),
+            (KPI_COLUMNS["ul_bler"], "UL BLER (%)", "smooth", (-3, 105)),
+            (KPI_COLUMNS["dl_bler"], "DL BLER rolling std (%)", "rolling", None),
+        ]
+    return [
+        (KPI_COLUMNS["dl_snr"], "DL SNR (dB)", "smooth", None),
+        (KPI_COLUMNS["dl_bler"], "DL BLER (%)", "smooth", (-3, 105)),
+        (KPI_COLUMNS["ul_bler"], "UL BLER (%)", "smooth", (-3, 105)),
+        (KPI_COLUMNS["dl_snr"], "DL SNR rolling std (dB)", "rolling", None),
     ]
 
-    for col, ylabel, ax, ylim in panels:
+
+def fig_kpi_grid() -> None:
+    fig, axes = plt.subplots(2, 2, figsize=(10.5, 6.5), sharex=False)
+    panel_specs = _kpi_grid_panels()
+
+    for (col, ylabel, mode, ylim), ax in zip(panel_specs, axes.flat):
         for class_name, (label, color) in CLASS_STYLE.items():
             csv_path = get_class_csv(class_name)
             if csv_path is None:
@@ -276,20 +326,15 @@ def fig_kpi_grid() -> None:
             vals = load_csv_column(csv_path, col)
             if not vals:
                 continue
-            if "rolling" in ylabel:
-                arr = np.asarray(vals, dtype=np.float32)
-                if len(arr) < 5:
-                    continue
-                roll_std = np.array(
-                    [arr[max(0, i - 4): i + 1].std() for i in range(len(arr))]
-                )
-                series = roll_std
+            if mode == "rolling":
+                series = _rolling_std(vals, window=5)
             else:
                 series = smooth(vals, w=5)
-            mean = float(np.mean(vals))
-            ax.plot(range(len(series)), series, color=color, linewidth=1.3,
-                    alpha=0.85,
-                    label=f"{label} (μ={mean:.1f})")
+            mean = float(np.mean(series))
+            ax.plot(
+                range(len(series)), series, color=color, linewidth=1.3, alpha=0.85,
+                label=f"{label} (μ={mean:.1f})",
+            )
 
         ax.set_xlabel("Time (s)", fontsize=10)
         ax.set_ylabel(ylabel, fontsize=10)
@@ -299,8 +344,12 @@ def fig_kpi_grid() -> None:
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8, framealpha=0.95)
 
-    fig.suptitle("Per-class KPI signatures used by the classifier",
-                 fontsize=13, fontweight="bold", y=1.02)
+    title = (
+        "gNB scheduler KPI signatures (DL MCS / BLER)"
+        if IS_GNB
+        else "Per-class KPI signatures used by the classifier"
+    )
+    fig.suptitle(title, fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     save_fig(fig, "kpi_grid")
 
@@ -416,7 +465,7 @@ def main() -> None:
     fig_confusion_matrix(eval_data)
     fig_metrics_bar(eval_data)
     fig_bler_timeseries()
-    fig_snr_timeseries()
+    fig_signature_timeseries()
     fig_kpi_grid()
     fig_combined_two_panel(eval_data)
     print(f"\nAll figures saved to {OUT_DIR.relative_to(ROOT)}/")
